@@ -31,7 +31,6 @@ void loop() {
   //MoveRudder();
   //GetSerialAngle();
   PID_rudder_control(GetSerialAngle());
-  
 }
 
 int ReadRudder() {
