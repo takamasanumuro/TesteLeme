@@ -40,19 +40,8 @@ void UN178Driver::setM1PWM(int pwm) {
   }
   if (pwm > 400)  // Max PWM dutycycle
     pwm = 400;
-
-  #ifdef DUALVNH5019MOTORSHIELD_TIMER1_AVAILABLE
-    if (_PWM1 == _PWM1_TIMER1_PIN && _PWM2 == _PWM2_TIMER1_PIN)
-    {
-      OCR1A = pwm;
-    }
-    else
-    {
-      analogWrite(_PWM1,pwm * 51 / 80); // map 400 to 255
-    }
-  #else
-    analogWrite(_PWM1,pwm * 51 / 80); // map 400 to 255
-  #endif
+  
+  analogWrite(_PWM1,pwm * 51 / 80); // map 400 to 255
 
   if (pwm == 0)
   {
@@ -81,18 +70,7 @@ void UN178Driver::setM2PWM(int pwm) {
   if (pwm > 400)  // Max PWM dutycycle
     pwm = 400;
 
-  #ifdef DUALVNH5019MOTORSHIELD_TIMER1_AVAILABLE
-    if (_PWM1 == _PWM1_TIMER1_PIN && _PWM2 == _PWM2_TIMER1_PIN)
-    {
-      OCR1A = pwm;
-    }
-    else
-    {
-      analogWrite(_PWM1,pwm * 51 / 80); // map 400 to 255
-    }
-  #else
-    analogWrite(_PWM2,pwm * 51 / 80); // map 400 to 255
-  #endif
+  analogWrite(_PWM2,pwm * 51 / 80); // map 400 to 255
 
   if (pwm == 0)
   {

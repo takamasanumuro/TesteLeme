@@ -1,15 +1,16 @@
 #include <Arduino.h>
 #include "RudderCheck.h"
 #include "UN178Driver.hpp"
-                                                                                                                                                                                                                                                                                                                                                                                                           #include "DualVNH5019MotorShield.h" //drive motor
-UN178Driver hBridge; // Controls the rudder and the winch, A0 and A1 analog inputs are used to measure the current of each H-bridge channel
+                                                                                                                                                                                                                                                                                                                                                                                                          #include "DualVNH5019MotorShield.h" //drive motor
+UN178Driver hBridge = UN178Driver(2, 4, 9, 7, 8, 10); // Controls the rudder and the winch, A0 and A1 analog inputs are used to measure the current of each H-bridge channel
 
-constexpr uint8_t rudderPinPot = A3;
+constexpr uint8_t rudderPinPot = A0;
 // Following constants were taken using a multimeter after setting the potentiometer to mid (5k) resistance and aligning the rudder to the center of the boat
 constexpr int16_t rudderAngleOffset = -2;  // To align the rudder to the bow of the boat
 constexpr int16_t rudderADCMinThreshold = 365;  // Rudder -37 degrees (Starboard)
 constexpr int16_t rudderADCMaxThreshold = 796;  // Rudder 57 degrees (Port)
-constexpr int16_t rudderMinAngle = -37; // Rudder -37 degrees (Starboard)
+// Fix zero offset issue later
+constexpr int16_t rudderMinAngle = -37; // Rudder -37 degrees (Starboard) 
 constexpr int16_t rudderMaxAngle = 57;  // Rudder 57 degrees (Port)
 constexpr int16_t rudderMaxPWM = 400;  
 constexpr uint16_t rudderLowPixhawk = 993;
@@ -40,21 +41,27 @@ void setup() {
 }
 
 void loop() {
+
   PID_rudder_control(GetRadioAngle(rudder));
-  PrintRadioAngle(/*delay_ms*/3000, rudder);
-  MAVLinkToPixhawk(rudder_angle, rudder_angle_test);
-  MAVLinkToPixhawk(rudder_pwm, rudder_output_pwm_test);
+  //PrintRadioAngle(3000, rudder);
+  //MAVLinkToPixhawk(rudder_angle, rudder_angle_test);
+  //MAVLinkToPixhawk(rudder_pwm, rudder_output_pwm_test);
+ 
 }
 
+
 int ReadRudder() {
+  
   int pot_rudder_ADC = analogRead(rudderPinPot);
   int pot_rudder_angle = map(pot_rudder_ADC, rudderADCMinThreshold, rudderADCMaxThreshold, rudderMinAngle, rudderMaxAngle);
   pot_rudder_angle += rudderAngleOffset;
+  #ifdef PRINT_RUDDER
   static uint32_t rudder_read_timer = millis();
   if (millis() - rudder_read_timer < 3000) return pot_rudder_angle;
   rudder_read_timer = millis();
   Serial.print("Rudder ADC: ");   Serial.println(pot_rudder_ADC);
   Serial.print("Rudder angle: "); Serial.println(pot_rudder_angle);
+  #endif
   /*Delete later*/ rudder_angle_test = pot_rudder_angle; /*Delete later*/
   return pot_rudder_angle;
 }
@@ -114,9 +121,6 @@ void PrintRadioAngle(uint32_t print_delay, int16_t pixhawk_channel) {
     case sail:
       Serial.print("Sail angle: "); Serial.println(pixHawkOutputs[pixhawk_channel]);
       break;
-    case motor:
-      Serial.print("Motor angle: "); Serial.println(pixHawkOutputs[pixhawk_channel]);
-      break;
   }
 }
 
@@ -142,14 +146,16 @@ void PID_rudder_control(int rudder_angle_desired){
   int rudder_output_pwm = PID_Proportional(rudder_error) + PID_Integral(rudder_error);
   // Constrains output given H-bridge PWM output range,
   rudder_output_pwm = constrain(rudder_output_pwm, -rudderMaxPWM, rudderMaxPWM);
-  rudder_output_pwm = -rudder_output_pwm; // Flips the sign of the output to match the rudder's direction
+  //rudder_output_pwm = -rudder_output_pwm; // Flips the sign of the output to match the rudder's direction
   if (rudder_error > -2 && rudder_error < 2) rudder_output_pwm = 0;
   /*Delete later*/ rudder_output_pwm_test = rudder_output_pwm; /*Delete later*/
-  hBridge.setM1PWM(rudder_output_pwm);
+  //hBridge.setM1PWM(rudder_output_pwm);
   hBridge.setM2PWM(rudder_output_pwm);  //-400 <-> +400
   static uint32_t rudder_log_timer = millis();
-  if (millis() - rudder_log_timer < 3000) return;
+  if (millis() - rudder_log_timer < 2000) return;
   rudder_log_timer = millis();
+  Serial.print("\nRudder desired: "); Serial.println(rudder_angle_desired);
+  Serial.print("Rudder present: "); Serial.println(rudder_angle_present);
   Serial.print("Rudder error: "); Serial.println(rudder_error);
   Serial.print("Rudder PWM: "); Serial.println(rudder_output_pwm);
 }
