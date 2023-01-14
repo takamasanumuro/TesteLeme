@@ -1,7 +1,7 @@
 #include <Arduino.h>
-#include "RudderCheck.h"
 #include "UN178Driver.hpp"
-                                                                                                                                                                                                                                                                                                                                                                                                          #include "DualVNH5019MotorShield.h" //drive motor
+#include "RudderCheck.h"              
+                                                                                                                                                                                                                                                                                                                                                                                            #include "DualVNH5019MotorShield.h" //drive motor
 UN178Driver hBridge = UN178Driver(2, 4, 9, 7, 8, 10); // Controls the rudder and the winch, A0 and A1 analog inputs are used to measure the current of each H-bridge channel
 
 constexpr uint8_t rudderPinPot = A0;
@@ -12,23 +12,25 @@ constexpr int16_t rudderADCMaxThreshold = 796;  // Rudder 57 degrees (Port)
 // Fix zero offset issue later
 constexpr int16_t rudderMinAngle = -37; // Rudder -37 degrees (Starboard) 
 constexpr int16_t rudderMaxAngle = 57;  // Rudder 57 degrees (Port)
-constexpr int16_t rudderMaxPWM = 400;  
+constexpr int16_t rudderMaxPWM = 360;  
 constexpr uint16_t rudderLowPixhawk = 993;
 constexpr uint16_t rudderHighPixhawk = 1986;
 constexpr uint8_t rudderPixhawkPin = 6; // Pixhawk output PWM input to read with pulseIn() function
-int16_t pixHawkOutputs[3] = {0};
+constexpr uint8_t numberPixhawkOutputs = 3;
+int16_t pixHawkOutputs[numberPixhawkOutputs] = {1500};
 enum pixHawkOutputsEnum {
   rudder = 0, 
   sail = 1, 
   motor = 2
 };
 
-constexpr float proportionalConstant = 5.f;
-constexpr float integralConstant = 2.5f;
+constexpr float proportionalConstant = 8.f;
+constexpr float integralConstant = 3.f;
 float integralSum = 0.0f;
 uint32_t rudderBeginTime, rudderEndTime;
 static int rudder_angle_test = 0;
 static int rudder_output_pwm_test = 0;
+
 
 void setup() {
   Serial.begin(115200);  // For PC communications
@@ -41,17 +43,14 @@ void setup() {
 }
 
 void loop() {
-
   PID_rudder_control(GetRadioAngle(rudder));
   //PrintRadioAngle(3000, rudder);
   //MAVLinkToPixhawk(rudder_angle, rudder_angle_test);
-  //MAVLinkToPixhawk(rudder_pwm, rudder_output_pwm_test);
- 
+  //MAVLinkToPixhawk(rudder_pwm, rudder_output_pwm_test); 
 }
 
 
 int ReadRudder() {
-  
   int pot_rudder_ADC = analogRead(rudderPinPot);
   int pot_rudder_angle = map(pot_rudder_ADC, rudderADCMinThreshold, rudderADCMaxThreshold, rudderMinAngle, rudderMaxAngle);
   pot_rudder_angle += rudderAngleOffset;
@@ -104,11 +103,14 @@ int GetSerialAngle() {
   return angle_received_previous;
 }
 
+
+
 int GetRadioAngle(int16_t pixhawk_channel) {
   pixHawkOutputs[pixhawk_channel] = pulseIn(rudderPixhawkPin, HIGH);
-  pixHawkOutputs[pixhawk_channel] = map(pixHawkOutputs[pixhawk_channel], rudderLowPixhawk, rudderHighPixhawk, rudderMinAngle, rudderMaxAngle);
+  pixHawkOutputs[pixhawk_channel] = map(pixHawkOutputs[pixhawk_channel], rudderLowPixhawk, rudderHighPixhawk, rudderMinAngle+10, rudderMaxAngle-10);
   return pixHawkOutputs[pixhawk_channel];
 }
+
 
 void PrintRadioAngle(uint32_t print_delay, int16_t pixhawk_channel) {
   static uint32_t print_timer = millis();
@@ -146,13 +148,13 @@ void PID_rudder_control(int rudder_angle_desired){
   int rudder_output_pwm = PID_Proportional(rudder_error) + PID_Integral(rudder_error);
   // Constrains output given H-bridge PWM output range,
   rudder_output_pwm = constrain(rudder_output_pwm, -rudderMaxPWM, rudderMaxPWM);
-  //rudder_output_pwm = -rudder_output_pwm; // Flips the sign of the output to match the rudder's direction
-  if (rudder_error > -2 && rudder_error < 2) rudder_output_pwm = 0;
+  rudder_output_pwm = -rudder_output_pwm; // Flips the sign of the output to match the rudder's direction
   /*Delete later*/ rudder_output_pwm_test = rudder_output_pwm; /*Delete later*/
+  if (rudder_error > -2 && rudder_error < 2) rudder_output_pwm = 0;
   //hBridge.setM1PWM(rudder_output_pwm);
   hBridge.setM2PWM(rudder_output_pwm);  //-400 <-> +400
   static uint32_t rudder_log_timer = millis();
-  if (millis() - rudder_log_timer < 2000) return;
+  if (millis() - rudder_log_timer < 500) return;
   rudder_log_timer = millis();
   Serial.print("\nRudder desired: "); Serial.println(rudder_angle_desired);
   Serial.print("Rudder present: "); Serial.println(rudder_angle_present);
@@ -208,6 +210,23 @@ void MAVLinkToPixhawk(MAVLink_options option, float data) {
 }
 
 
+void TestAnalogWrite(uint8_t pwm_test_pin) {
+  static uint32_t pwm_test_timer = millis();
+  static int16_t pwm_test_pwm = 0;
+  static bool is_rising = true;
+  if (millis() - pwm_test_timer < 80) return;
+  pwm_test_timer = millis();
+  if (is_rising) {
+    pwm_test_pwm += 10;
+    if (pwm_test_pwm > 255) is_rising = false;
+  }
+  else {
+    pwm_test_pwm -= 10;
+    if (pwm_test_pwm < 0) is_rising = true;
+  }
+  constrain(pwm_test_pwm, 0, 255);
+  analogWrite(pwm_test_pin, pwm_test_pwm);
+}
 
 
 
