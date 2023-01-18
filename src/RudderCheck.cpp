@@ -2,7 +2,7 @@
 #include "UN178Driver.hpp"
 #include "RudderCheck.h"              
                                                                                                                                                                                                                                                                                                                                                                                             #include "DualVNH5019MotorShield.h" //drive motor
-UN178Driver hBridge = UN178Driver(2, 4, 9, 7, 8, 10); // Controls the rudder and the winch, A0 and A1 analog inputs are used to measure the current of each H-bridge channel
+UN178Driver hBridge = UN178Driver(2, 3, 9, 7, 8, 10); // Initilizes those pins as outputs
 
 constexpr uint8_t rudderPinPot = A0;
 // Following constants were taken using a multimeter after setting the potentiometer to mid (5k) resistance and aligning the rudder to the center of the boat
@@ -15,14 +15,9 @@ constexpr int16_t rudderMaxAngle = 57;  // Rudder 57 degrees (Port)
 constexpr int16_t rudderMaxPWM = 360;  
 constexpr uint16_t rudderLowPixhawk = 993;
 constexpr uint16_t rudderHighPixhawk = 1986;
-constexpr uint8_t rudderPixhawkPin = 6; // Pixhawk output PWM input to read with pulseIn() function
-constexpr uint8_t numberPixhawkOutputs = 3;
-int16_t pixHawkOutputs[numberPixhawkOutputs] = {1500};
-enum pixHawkOutputsEnum {
-  rudder = 0, 
-  sail = 1, 
-  motor = 2
-};
+constexpr uint8_t numberPixhawkOutputs = 2;
+constexpr uint8_t pixHawkReadingPins[numberPixhawkOutputs] = {6, 5}; // Arduino pins that receive pixhawk output PWM to read with pulseIn() function
+int16_t pixHawkReadingsPWM[numberPixhawkOutputs] = {1500}; // Array that stores the PWM readings from Pixhawk. Default initialized to middle servo trim of 1500us.
 
 constexpr float proportionalConstant = 8.f;
 constexpr float integralConstant = 3.f;
@@ -38,12 +33,15 @@ void setup() {
   Serial.println("Boat Rudder Test");
   hBridge.init(); //
   pinMode(rudderPinPot, INPUT); // Rudder potentiometer
-  pinMode(rudderPixhawkPin, INPUT); // Pixhawk output PWM input to read with pulseIn() function
+  for (auto &pixHawkReadingPin : pixHawkReadingPins) pinMode(pixHawkReadingPin, INPUT); // Pixhawk output PWM input to read with pulseIn() function
   rudderBeginTime = millis();
 }
 
 void loop() {
-  PID_rudder_control(GetRadioAngle(rudder));
+  GetAllPixhawkReadings();
+  PID_rudder_control(GetAngleFromReading(rudder));
+  ThrottleControl(GetPixhawkReadings(throttle));
+  TestAnalogWrite(12);
   //PrintRadioAngle(3000, rudder);
   //MAVLinkToPixhawk(rudder_angle, rudder_angle_test);
   //MAVLinkToPixhawk(rudder_pwm, rudder_output_pwm_test); 
@@ -103,14 +101,47 @@ int GetSerialAngle() {
   return angle_received_previous;
 }
 
-
-
-int GetRadioAngle(int16_t pixhawk_channel) {
-  pixHawkOutputs[pixhawk_channel] = pulseIn(rudderPixhawkPin, HIGH);
-  pixHawkOutputs[pixhawk_channel] = map(pixHawkOutputs[pixhawk_channel], rudderLowPixhawk, rudderHighPixhawk, rudderMinAngle+10, rudderMaxAngle-10);
-  return pixHawkOutputs[pixhawk_channel];
+void GetAllPixhawkReadings() {
+  for (int i = 0; i < numberPixhawkOutputs; i++) {
+    pixHawkReadingsPWM[i] = pulseIn(pixHawkReadingPins[i], HIGH);
+  }
 }
 
+int16_t GetPixhawkReadings(pixHawkChannelsEnum pixhawk_channel) {
+  for (int i = 0; i < numberPixhawkOutputs; i++) {
+    pixHawkReadingsPWM[i] = pulseIn(pixHawkReadingPins[i], HIGH);
+  }
+  return pixHawkReadingsPWM[pixhawk_channel];
+}
+
+int16_t GetAngleFromReading(pixHawkChannelsEnum pixhawk_channel) {
+  pixHawkReadingsPWM[pixhawk_channel] = map(pixHawkReadingsPWM[pixhawk_channel], rudderLowPixhawk, rudderHighPixhawk, rudderMinAngle+10, rudderMaxAngle-10);
+  return pixHawkReadingsPWM[pixhawk_channel];
+}
+
+void ThrottleControl(int16_t throttle_signal) {
+  static constexpr int16_t throttle_buffer = 30;
+  static constexpr int16_t throttle_trim = 1500;
+  throttle_signal = constrain(throttle_signal, 1000, 2000);
+  if (throttle_signal > throttle_trim + throttle_buffer) {
+    map(throttle_signal, throttle_trim + throttle_buffer, 2000, 0, 380);
+    hBridge.setM1PWM(throttle_signal);
+  }
+  else if (throttle_signal < throttle_trim - throttle_buffer) {
+    map(throttle_signal, 1000, throttle_trim - throttle_buffer, 380, 0);
+    throttle_signal = -throttle_signal;
+    hBridge.setM1PWM(throttle_signal);
+  }
+  else {
+    hBridge.setM1PWM(0);
+  }
+  #ifdef PRINT_THROTTLE
+  static uint32_t throttle_read_timer = millis();
+  if (millis() - throttle_read_timer < 1000) return;
+  throttle_read_timer = millis();
+  Serial.print("Throttle signal: "); Serial.println(throttle_signal);
+  #endif
+}
 
 void PrintRadioAngle(uint32_t print_delay, int16_t pixhawk_channel) {
   static uint32_t print_timer = millis();
@@ -118,10 +149,10 @@ void PrintRadioAngle(uint32_t print_delay, int16_t pixhawk_channel) {
   print_timer = millis();
   switch(pixhawk_channel) {
     case rudder:
-      Serial.print("Rudder angle: "); Serial.println(pixHawkOutputs[pixhawk_channel]);
+      Serial.print("Rudder angle: "); Serial.println(pixHawkReadingsPWM[pixhawk_channel]);
       break;
     case sail:
-      Serial.print("Sail angle: "); Serial.println(pixHawkOutputs[pixhawk_channel]);
+      Serial.print("Sail angle: "); Serial.println(pixHawkReadingsPWM[pixhawk_channel]);
       break;
   }
 }
